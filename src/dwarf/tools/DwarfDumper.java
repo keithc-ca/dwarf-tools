@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2017, 2018 IBM Corp. and others
+ * Copyright (c) 2017, 2019 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -202,7 +202,7 @@ public class DwarfDumper {
 			case DwarfAttribute.DW_AT_recursive:
 				return "recursive";
 			default:
-				return Integer.toString(attribute);
+				return "0x" + Integer.toHexString(attribute);
 			}
 		}
 
@@ -263,7 +263,7 @@ public class DwarfDumper {
 			case DwarfForm.DW_FORM_ref_sig8:
 				return "ref_sig8";
 			default:
-				return Integer.toString(form);
+				return "0x" + Integer.toHexString(form);
 			}
 		}
 
@@ -384,7 +384,7 @@ public class DwarfDumper {
 			case DwarfTag.DW_TAG_shared_type:
 				return "shared_type";
 			default:
-				return Integer.toString(tag);
+				return "0x" + Integer.toHexString(tag);
 			}
 		}
 
