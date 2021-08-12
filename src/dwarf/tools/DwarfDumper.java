@@ -403,8 +403,25 @@ public class DwarfDumper {
 
 		@Override
 		public void acceptBlock(int attribute, int form, byte[] data) {
+			int length = data.length;
+
 			beginAttribute(attribute, form);
-			System.out.printf("block length %d%n", data.length);
+			System.out.format("block length %d", length);
+
+			if (length != 0) {
+				final int limit = Math.min(length, 20);
+
+				System.out.print(":");
+				for (int i = 0; i < limit; ++i) {
+					System.out.format(" %02X", data[i]);
+				}
+
+				if (length > limit) {
+					System.out.print(" ...");
+				}
+			}
+
+			System.out.println();
 		}
 
 		@Override
