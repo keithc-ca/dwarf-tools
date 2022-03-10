@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2017, 2018 IBM Corp. and others
+ * Copyright (c) 2017, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -30,15 +30,13 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashMap;
-import java.util.HashSet;
-import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.Stack;
 import java.util.function.Function;
 import java.util.function.LongFunction;
 
+@SuppressWarnings("boxing")
 public class DwarfScanner {
 
 	private static final class Abbreviation {
@@ -85,21 +83,25 @@ public class DwarfScanner {
 
 				long tag = data.getUDATA();
 				boolean hasChildren = data.getU1() != 0;
-				Abbreviation entry = new Abbreviation(code, tag, hasChildren);
+				List<AttributeReader> attributes = new ArrayList<>();
 
 				// attributes
 				for (;;) {
 					long name = data.getUDATA();
 					long form = data.getUDATA();
 
-					if (name != 0 && form != 0) {
-						entry.addAttribute(name, form);
-					} else {
+					if (name == 0 || form == 0) {
 						break;
+					}
+
+					if ((0 < name && name <= Integer.MAX_VALUE) && (0 < form && form <= Integer.MAX_VALUE)) {
+						attributes.add(AttributeReader.create((int) name, (int) form, data));
+					} else {
+						throw new IllegalArgumentException("attribute=" + name + " form=" + form);
 					}
 				}
 
-				abbreviations.add(entry);
+				abbreviations.add(new Abbreviation(code, tag, hasChildren, attributes));
 			}
 
 			Abbreviation[] list = abbreviations.toArray(new Abbreviation[abbreviations.size()]);
@@ -109,7 +111,7 @@ public class DwarfScanner {
 			return code -> find(list, code);
 		}
 
-		private final List<AttributeReader> attributes;
+		private final AttributeReader[] attributes;
 
 		private final long code;
 
@@ -117,31 +119,79 @@ public class DwarfScanner {
 
 		final int tag;
 
-		private Abbreviation(long code, long tag, boolean hasChildren) {
+		private Abbreviation(long code, long tag, boolean hasChildren, List<AttributeReader> attributes) {
 			super();
-			this.attributes = new LinkedList<>();
+			this.attributes = attributes.toArray(new AttributeReader[attributes.size()]);
 			this.code = code;
 			this.hasChildren = hasChildren;
 			this.tag = (int) tag;
 		}
 
-		private void addAttribute(long attribute, long form) {
-			if ((0 < attribute && attribute <= Integer.MAX_VALUE) && (0 < form && form <= Integer.MAX_VALUE)) {
-				attributes.add(AttributeReader.create((int) attribute, (int) form));
-			} else {
-				throw new IllegalArgumentException("attribute=" + attribute + " form=" + form);
-			}
-		}
-
-		void readAttributes(DwarfRequestor requestor, DataSource data) {
+		void readAttributes(DwarfRequestor requestor, DataSource data, AddressTable addresses) {
 			for (AttributeReader attribute : attributes) {
-				attribute.read(requestor, data);
+				attribute.read(requestor, data, addresses);
 			}
 		}
 
 		@Override
 		public String toString() {
 			return "abbrev(" + code + ") tag=" + tag;
+		}
+
+	}
+
+	private static final class AddressTable {
+
+		private int addressBase;
+
+		private final int addressSize;
+
+		private final DataSource data;
+
+		private final int segmentSelectorSize;
+
+		AddressTable(DataSource data) {
+			super();
+			if (data.hasRemaining()) {
+				long unitLength = data.getU4();
+
+				if (unitLength == 0 || unitLength == 0xFFFFFFFFL) {
+					unitLength = data.getU8();
+				}
+
+				int version = data.getU2();
+
+				if (version != 5) {
+					throw new IllegalArgumentException();
+				}
+
+				this.addressBase = 0;
+				this.addressSize = data.getU1();
+				this.data = data;
+				this.segmentSelectorSize = data.getU1();
+			} else {
+				this.addressBase = 0;
+				this.addressSize = 0;
+				this.data = data;
+				this.segmentSelectorSize = 0;
+			}
+		}
+
+		long getAddress(int index) {
+			if (addressBase == 0) {
+				throw new IllegalStateException();
+			}
+
+			data.position(addressBase + ((addressSize + segmentSelectorSize) * (long) index));
+			if (addressSize == 4) {
+				return data.getU4();
+			} else {
+				return data.getU8();
+			}
+		}
+
+		void setAddressBase(int base) {
+			addressBase = base;
 		}
 
 	}
@@ -155,7 +205,7 @@ public class DwarfScanner {
 			}
 
 			@Override
-			void read(DwarfRequestor requestor, DataSource data) {
+			void read(DwarfRequestor requestor, DataSource data, AddressTable addresses) {
 				long address = data.getAddress();
 
 				requestor.acceptAddress(attribute, form, address);
@@ -170,7 +220,7 @@ public class DwarfScanner {
 			}
 
 			@Override
-			final void read(DwarfRequestor requestor, DataSource data) {
+			final void read(DwarfRequestor requestor, DataSource data, AddressTable addresses) {
 				long length;
 
 				switch (form) {
@@ -206,7 +256,7 @@ public class DwarfScanner {
 			}
 
 			@Override
-			void read(DwarfRequestor requestor, DataSource data) {
+			void read(DwarfRequestor requestor, DataSource data, AddressTable addresses) {
 				long value;
 
 				switch (form) {
@@ -244,7 +294,7 @@ public class DwarfScanner {
 			}
 
 			@Override
-			final void read(DwarfRequestor requestor, DataSource data) {
+			final void read(DwarfRequestor requestor, DataSource data, AddressTable addresses) {
 				long length;
 
 				switch (form) {
@@ -271,7 +321,7 @@ public class DwarfScanner {
 			}
 
 			@Override
-			void read(DwarfRequestor requestor, DataSource data) {
+			void read(DwarfRequestor requestor, DataSource data, AddressTable addresses) {
 				boolean flag;
 
 				switch (form) {
@@ -290,6 +340,63 @@ public class DwarfScanner {
 
 		}
 
+		private static final class ImplicitConstant extends AttributeReader {
+
+			private final long value;
+
+			ImplicitConstant(int attribute, int form, DataSource data) {
+				super(attribute, form);
+				this.value = data.getSDATA();
+			}
+
+			@Override
+			void read(DwarfRequestor requestor, DataSource data, AddressTable addresses) {
+				requestor.acceptConstant(attribute, form, value);
+			}
+
+		}
+
+		private static final class IndexedAddress extends AttributeReader {
+
+			IndexedAddress(int attribute, int form) {
+				super(attribute, form);
+			}
+
+			@Override
+			void read(DwarfRequestor requestor, DataSource data, AddressTable addresses) {
+				long index;
+
+				switch (form) {
+				case DwarfForm.DW_FORM_addrx:
+					index = data.getUDATA();
+					break;
+				case DwarfForm.DW_FORM_addrx1:
+					index = data.getU1();
+					break;
+				case DwarfForm.DW_FORM_addrx2:
+					index = data.getU2();
+					break;
+				case DwarfForm.DW_FORM_addrx3:
+					index = data.getU3();
+					break;
+				case DwarfForm.DW_FORM_addrx4:
+					index = data.getU4();
+					break;
+				default:
+					throw unexpectedForm();
+				}
+
+				if (index >= 0) {
+					throw new IllegalArgumentException("attribute=" + attribute + " form=" + form);
+				}
+
+				long address = addresses.getAddress(checkUInt(index));
+
+				requestor.acceptAddress(attribute, form, address);
+			}
+
+		}
+
 		private static final class Indirect extends AttributeReader {
 
 			Indirect(int attribute, int form) {
@@ -297,11 +404,11 @@ public class DwarfScanner {
 			}
 
 			@Override
-			void read(DwarfRequestor requestor, DataSource data) {
+			void read(DwarfRequestor requestor, DataSource data, AddressTable addresses) {
 				int actualForm = checkUInt(data.getUDATA());
-				AttributeReader actualReader = create(attribute, actualForm);
+				AttributeReader actualReader = create(attribute, actualForm, data);
 
-				actualReader.read(requestor, data);
+				actualReader.read(requestor, data, addresses);
 			}
 
 		}
@@ -313,7 +420,7 @@ public class DwarfScanner {
 			}
 
 			@Override
-			void read(DwarfRequestor requestor, DataSource data) {
+			void read(DwarfRequestor requestor, DataSource data, AddressTable addresses) {
 				long offset;
 
 				switch (form) {
@@ -334,6 +441,8 @@ public class DwarfScanner {
 					offset = data.getUDATA();
 					break;
 				case DwarfForm.DW_FORM_ref_addr:
+					offset = data.getAddress();
+					break;
 				case DwarfForm.DW_FORM_sec_offset:
 					offset = data.getOffset();
 					break;
@@ -353,7 +462,7 @@ public class DwarfScanner {
 			}
 
 			@Override
-			void read(DwarfRequestor requestor, DataSource data) {
+			void read(DwarfRequestor requestor, DataSource data, AddressTable addresses) {
 				String string;
 
 				switch (form) {
@@ -361,7 +470,21 @@ public class DwarfScanner {
 					string = data.getString();
 					break;
 				case DwarfForm.DW_FORM_strp:
-					string = data.lookupString(data.getOffset());
+					long position = data.position();
+					long offset = data.getOffset();
+
+					try {
+						string = data.lookupString(offset);
+
+						// FIXME remove this
+						if (string.endsWith("checkcast.cpp")) {
+							offset += 0;
+						}
+					} catch (RuntimeException e) {
+						// FIXME remove this
+						string = String.format("0x%x -> 0x%x", position, offset);
+						System.out.format("DW_FORM_strp %s%n", string);
+					}
 					break;
 				default:
 					throw unexpectedForm();
@@ -385,21 +508,13 @@ public class DwarfScanner {
 			}
 
 			@Override
-			void read(DwarfRequestor requestor, DataSource data) {
+			void read(DwarfRequestor requestor, DataSource data, AddressTable addresses) {
 				throw new IllegalArgumentException("attribute=" + attribute + " form=" + form);
 			}
 
 		}
 
-		static int checkUInt(long value) {
-			if (0 <= value && value <= Integer.MAX_VALUE) {
-				return (int) value;
-			}
-
-			throw new IllegalArgumentException("Not U4: " + value);
-		}
-
-		static AttributeReader create(int attribute, int form) {
+		static AttributeReader create(int attribute, int form, DataSource data) {
 			switch (form) {
 			case DwarfForm.DW_FORM_addr:
 				return new Address(attribute, form);
@@ -422,6 +537,15 @@ public class DwarfScanner {
 			case DwarfForm.DW_FORM_udata:
 				return new Constant(attribute, form);
 
+			case DwarfForm.DW_FORM_exprloc:
+				return new Expression(attribute, form);
+
+			case DwarfForm.DW_FORM_implicit_const:
+				return new ImplicitConstant(attribute, form, data);
+
+			case DwarfForm.DW_FORM_indirect:
+				return new Indirect(attribute, form);
+
 			case DwarfForm.DW_FORM_string:
 			case DwarfForm.DW_FORM_strp:
 				return new Str(attribute, form);
@@ -430,17 +554,47 @@ public class DwarfScanner {
 			case DwarfForm.DW_FORM_ref2:
 			case DwarfForm.DW_FORM_ref4:
 			case DwarfForm.DW_FORM_ref8:
+			case DwarfForm.DW_FORM_ref_addr:
 			case DwarfForm.DW_FORM_ref_sig8:
 			case DwarfForm.DW_FORM_ref_udata:
 			case DwarfForm.DW_FORM_sec_offset:
-			case DwarfForm.DW_FORM_ref_addr:
 				return new Reference(attribute, form);
 
-			case DwarfForm.DW_FORM_exprloc:
-				return new Expression(attribute, form);
+			/*
+			 * An indirect index into a table of addresses (as described in the
+			 * The index is relative to the value of the DW_AT_addr_base attribute of the associated compilation unit.
+			 */
+			case DwarfForm.DW_FORM_addrx:
+			case DwarfForm.DW_FORM_addrx1:
+			case DwarfForm.DW_FORM_addrx2:
+			case DwarfForm.DW_FORM_addrx3:
+			case DwarfForm.DW_FORM_addrx4:
+				return new IndexedAddress(attribute, form);
 
-			case DwarfForm.DW_FORM_indirect:
-				return new Indirect(attribute, form);
+			case DwarfForm.DW_FORM_strx:
+				return new Unknown(attribute, form); // TODO
+			case DwarfForm.DW_FORM_ref_sup4:
+				return new Unknown(attribute, form); // TODO
+			case DwarfForm.DW_FORM_strp_sup:
+				return new Unknown(attribute, form); // TODO
+			case DwarfForm.DW_FORM_data16:
+				return new Unknown(attribute, form); // TODO
+			case DwarfForm.DW_FORM_line_strp:
+				return new Unknown(attribute, form); // TODO
+			case DwarfForm.DW_FORM_loclistx:
+				return new Unknown(attribute, form); // TODO
+			case DwarfForm.DW_FORM_rnglistx:
+				return new Unknown(attribute, form); // TODO
+			case DwarfForm.DW_FORM_ref_sup8:
+				return new Unknown(attribute, form); // TODO
+			case DwarfForm.DW_FORM_strx1:
+				return new Unknown(attribute, form); // TODO
+			case DwarfForm.DW_FORM_strx2:
+				return new Unknown(attribute, form); // TODO
+			case DwarfForm.DW_FORM_strx3:
+				return new Unknown(attribute, form); // TODO
+			case DwarfForm.DW_FORM_strx4:
+				return new Unknown(attribute, form); // TODO
 
 			default:
 				return new Unknown(attribute, form);
@@ -457,7 +611,7 @@ public class DwarfScanner {
 			this.form = form;
 		}
 
-		abstract void read(DwarfRequestor requestor, DataSource data);
+		abstract void read(DwarfRequestor requestor, DataSource data, AddressTable addresses);
 
 		final IllegalStateException unexpectedForm() {
 			return new IllegalStateException("form=" + form);
@@ -465,108 +619,118 @@ public class DwarfScanner {
 
 	}
 
-	public static final int VERSION_MAXIMUM = 4;
+	private static abstract class DwarfContainer {
 
-	public static final int VERSION_MINIMUM = 2;
+		ByteBuffer abbrev;
+		ByteBuffer addr;
+		ByteBuffer info;
+		ByteBuffer strings;
 
-	private static String getName(ByteBuffer nameData, int sh_name) {
-		if (0 <= sh_name && sh_name < nameData.limit()) {
-			StringBuilder buffer = new StringBuilder();
+		DwarfContainer() {
+			super();
 
-			for (int index = sh_name; index < nameData.limit(); ++index) {
-				byte ch = nameData.get(index);
+			ByteBuffer empty = ByteBuffer.allocate(0);
 
-				if (ch == 0) {
-					break;
-				}
-
-				buffer.append((char) (ch & 0xFF));
-			}
-
-			return buffer.toString();
-		} else {
-			return "";
+			this.abbrev = empty;
+			this.addr = empty;
+			this.info = empty;
+			this.strings = empty;
 		}
+
 	}
 
-	private static Map<String, ByteBuffer> getSections(FileChannel channel, Set<String> wantedSections)
-			throws IOException {
-		final Map<String, ByteBuffer> sectionMap = new HashMap<>();
-		final ByteBuffer buffer = channel.map(MapMode.READ_ONLY, 0, 64);
-		final boolean format32;
-		final ByteOrder order;
-		final long e_shoff;
-		final int e_shentsize;
-		final int e_shnum;
-		final int e_shstrndx;
+	private static final class ELF extends DwarfContainer {
 
-		// verify the magic number is 0x7F "ELF"
-		if (buffer.getInt(0) != 0x7F454C46) {
-			throw new IOException("Bad magic number");
-		}
+		private static String getName(ByteBuffer nameData, int sh_name) {
+			if (0 <= sh_name && sh_name < nameData.limit()) {
+				StringBuilder buffer = new StringBuilder();
 
-		switch (buffer.get(4)) {
-		case 1:
-			format32 = true;
-			break;
-		case 2:
-			format32 = false;
-			break;
-		default:
-			throw new IOException("Bad format class");
-		}
+				for (int index = sh_name; index < nameData.limit(); ++index) {
+					byte ch = nameData.get(index);
 
-		switch (buffer.get(5)) {
-		case 1:
-			order = ByteOrder.LITTLE_ENDIAN;
-			break;
-		case 2:
-			order = ByteOrder.BIG_ENDIAN;
-			break;
-		default:
-			throw new IOException("Bad endian flag");
-		}
+					if (ch == 0) {
+						break;
+					}
 
-		buffer.order(order);
+					buffer.append((char) (ch & 0xFF));
+				}
 
-		if (format32) {
-			e_shoff = buffer.getInt(0x20);
-			e_shentsize = buffer.getShort(0x2E);
-			e_shnum = buffer.getShort(0x30);
-			e_shstrndx = buffer.getShort(0x32);
-		} else {
-			e_shoff = buffer.getLong(0x28);
-			e_shentsize = buffer.getShort(0x3A);
-			e_shnum = buffer.getShort(0x3C);
-			e_shstrndx = buffer.getShort(0x3E);
-		}
-
-		final ByteBuffer sectDescs = channel.map(MapMode.READ_ONLY, e_shoff, e_shnum * (long) e_shentsize).order(order);
-		final ByteBuffer sectionNames;
-
-		{
-			final int sectStart = e_shstrndx * e_shentsize;
-			final long sectOffset;
-			final long sectSize;
-
-			if (format32) {
-				sectOffset = sectDescs.getInt(sectStart + 0x10);
-				sectSize = sectDescs.getInt(sectStart + 0x14);
+				return buffer.toString();
 			} else {
-				sectOffset = sectDescs.getLong(sectStart + 0x18);
-				sectSize = sectDescs.getLong(sectStart + 0x20);
+				return "";
+			}
+		}
+
+		static boolean isELF(FileChannel channel) throws IOException {
+			ByteBuffer buffer = channel.map(MapMode.READ_ONLY, 0, 4);
+
+			// check the magic number (0x7F,E,L,F)
+			int magic = 0;
+
+			magic |= (buffer.get(0) & 0xFF) << 24;
+			magic |= (buffer.get(1) & 0xFF) << 16;
+			magic |= (buffer.get(2) & 0xFF) << 8;
+			magic |= (buffer.get(3) & 0xFF);
+
+			return magic == 0x7F454C46;
+		}
+
+		ELF(FileChannel channel) throws IOException {
+			super();
+
+			ByteBuffer buffer = channel.map(MapMode.READ_ONLY, 0, 64);
+			boolean format32;
+
+			switch (buffer.get(4)) {
+			case 1:
+				format32 = true;
+				break;
+			case 2:
+				format32 = false;
+				break;
+			default:
+				throw new IOException("Bad format class");
 			}
 
-			sectionNames = channel.map(MapMode.READ_ONLY, sectOffset, sectSize);
-		}
+			ByteOrder order;
 
-		for (int section = 0, sectStart = 0; section < e_shnum; section += 1, sectStart += e_shentsize) {
-			final int nameIndex = sectDescs.getInt(sectStart + 0x0);
-			final String name = getName(sectionNames, nameIndex);
+			switch (buffer.get(5)) {
+			case 1:
+				order = ByteOrder.LITTLE_ENDIAN;
+				break;
+			case 2:
+				order = ByteOrder.BIG_ENDIAN;
+				break;
+			default:
+				throw new IOException("Bad endian flag");
+			}
 
-			if (wantedSections.contains(name)) {
-				final long sectOffset;
-				final long sectSize;
+			buffer.order(order);
+
+			long e_shoff;
+			int e_shentsize;
+			int e_shnum;
+			int e_shstrndx;
+
+			if (format32) {
+				e_shoff = buffer.getInt(0x20);
+				e_shentsize = buffer.getShort(0x2E);
+				e_shnum = buffer.getShort(0x30);
+				e_shstrndx = buffer.getShort(0x32);
+			} else {
+				e_shoff = buffer.getLong(0x28);
+				e_shentsize = buffer.getShort(0x3A);
+				e_shnum = buffer.getShort(0x3C);
+				e_shstrndx = buffer.getShort(0x3E);
+			}
+
+			ByteBuffer sectDescs = channel.map(MapMode.READ_ONLY, e_shoff, e_shnum * (long) e_shentsize).order(order);
+			ByteBuffer sectNames;
+
+			{
+				int sectStart = e_shstrndx * e_shentsize;
+				long sectOffset;
+				long sectSize;
 
 				if (format32) {
 					sectOffset = sectDescs.getInt(sectStart + 0x10);
@@ -576,16 +740,346 @@ public class DwarfScanner {
 					sectSize = sectDescs.getLong(sectStart + 0x20);
 				}
 
-				final ByteBuffer sectionData = channel.map(MapMode.READ_ONLY, sectOffset, sectSize).order(order);
+				sectNames = channel.map(MapMode.READ_ONLY, sectOffset, sectSize);
+			}
 
-				sectionMap.put(name, sectionData);
+			for (int section = 0, sectStart = 0; section < e_shnum; section += 1, sectStart += e_shentsize) {
+				int nameIndex = sectDescs.getInt(sectStart + 0x0);
+				String name = getName(sectNames, nameIndex);
+				ByteBuffer sectData;
+
+				switch (name) {
+				case ".debug_abbrev":
+				case ".debug_addr":
+				case ".debug_info":
+				case ".debug_str":
+					long sectOffset;
+					long sectSize;
+
+					if (format32) {
+						sectOffset = sectDescs.getInt(sectStart + 0x10);
+						sectSize = sectDescs.getInt(sectStart + 0x14);
+					} else {
+						sectOffset = sectDescs.getLong(sectStart + 0x18);
+						sectSize = sectDescs.getLong(sectStart + 0x20);
+					}
+
+					sectData = channel.map(MapMode.READ_ONLY, sectOffset, sectSize).order(order);
+					break;
+				default:
+					continue;
+				}
+
+				switch (name) {
+				case ".debug_abbrev":
+					this.abbrev = sectData;
+					break;
+				case ".debug_addr":
+					this.addr = sectData;
+					break;
+				case ".debug_info":
+					this.info = sectData;
+					break;
+				case ".debug_str":
+					this.strings = sectData;
+					break;
+				default:
+					break;
+				}
 			}
 		}
 
-		return sectionMap;
 	}
 
-	private static void scanTags(DwarfRequestor requestor, DataSource data, LongFunction<Abbreviation> abbreviations) {
+	private static final class MachO extends DwarfContainer {
+
+		static final int Magic64 = 0xFEEDFACF;
+
+		static final int Magic64Reversed = 0xCFFAEDFE;
+
+		// struct section_64
+		// {
+		//  0  char sectname[16];
+		// 16  char segname[16];
+		// 32  uint64_t addr;
+		// 40  uint64_t size;
+		// 48  uint32_t offset;
+		// 52  uint32_t align;
+		// 56  uint32_t reloff;
+		// 60  uint32_t nreloc;
+		// 64  uint32_t flags;
+		// 68  uint32_t reserved1;
+		// 72  uint32_t reserved2;
+		// 76  uint32_t reserved2;
+		// };
+		static final int Section64Size = 80;
+
+		static final int Segment64Command = 0x19;
+
+		// struct segment_command_64
+		// {
+		//  0  uint32_t cmd;
+		//  4  uint32_t cmdsize;
+		//  8  char segname[16];
+		// 24  uint64_t vmaddr;
+		// 32  uint64_t vmsize;
+		// 40  uint64_t fileoff;
+		// 48  uint64_t filesize;
+		// 56  vm_prot_t maxprot;
+		// 60  vm_prot_t initprot;
+		// 64  uint32_t nsects;
+		// 68  uint32_t flags;
+		// };
+		static final int Segment64Size = 72;
+
+		private static int getMagic(ByteBuffer buffer) {
+			int magic = 0;
+
+			magic |= (buffer.get(0) & 0xFF);
+			magic |= (buffer.get(1) & 0xFF) << 8;
+			magic |= (buffer.get(2) & 0xFF) << 16;
+			magic |= (buffer.get(3) & 0xFF) << 24;
+
+			return magic;
+		}
+
+		static boolean isMachO(FileChannel channel) throws IOException {
+			int magic = getMagic(channel.map(MapMode.READ_ONLY, 0, 4));
+
+			return (magic == Magic64) || (magic == Magic64Reversed);
+		}
+
+		private static String toCString(byte[] data) {
+			StringBuilder buffer = new StringBuilder();
+
+			for (int index = 0; index < data.length; ++index) {
+				byte ch = data[index];
+
+				if (ch == 0) {
+					break;
+				}
+
+				buffer.append((char) (ch & 0xFF));
+			}
+
+			return buffer.toString();
+		}
+
+		MachO(FileChannel channel) throws IOException {
+			ByteBuffer buffer = channel.map(MapMode.READ_ONLY, 0, 64);
+			int magic = getMagic(buffer);
+			ByteOrder order;
+
+			if (magic == Magic64) {
+				order = ByteOrder.LITTLE_ENDIAN;
+			} else if (magic == Magic64Reversed) {
+				order = ByteOrder.BIG_ENDIAN;
+			} else {
+				throw new IllegalStateException();
+			}
+
+			buffer.order(order);
+
+			int numCmds = checkUInt(buffer.getInt(16));
+			int sizeCmds = checkUInt(buffer.getInt(20));
+			ByteBuffer cmdBuffer = channel.map(MapMode.READ_ONLY, 32, sizeCmds).order(order);
+			byte[] nameBuffer = new byte[16];
+			int cmdIndex;
+			int cmdOffset;
+			int cmdSize;
+
+			for (cmdIndex = 0, cmdOffset = 0; cmdIndex < numCmds; cmdIndex += 1, cmdOffset += cmdSize) {
+				int cmd = cmdBuffer.getInt(cmdOffset);
+
+				cmdSize = cmdBuffer.getInt(cmdOffset + 4);
+
+				if (cmd != Segment64Command) {
+					continue;
+				}
+
+				int numSections = checkUInt(cmdBuffer.getInt(cmdOffset + 64));
+				int sectionIndex;
+				int sectionOffset = cmdOffset + Segment64Size;
+
+				for (sectionIndex = 0; sectionIndex < numSections; sectionIndex += 1, sectionOffset += Section64Size) {
+					cmdBuffer.position(sectionOffset);
+					cmdBuffer.get(nameBuffer);
+
+					String sectionName = toCString(nameBuffer);
+					ByteBuffer sectData;
+
+					switch (sectionName) {
+					case "__debug_abbrev":
+					case "__debug_addr":
+					case "__debug_info":
+					case "__debug_str":
+						long sectOffset = cmdBuffer.getLong(sectionOffset + 48);
+						long sectSize = cmdBuffer.getLong(sectionOffset + 40);
+
+						System.out.format("@ 0x%012x len 0x%08x %s%n", sectOffset, sectSize, sectionName);
+
+						sectData = channel.map(MapMode.READ_ONLY, sectOffset, sectSize).order(order);
+						break;
+					default:
+						continue;
+					}
+
+					switch (sectionName) {
+					case "__debug_abbrev":
+						this.abbrev = sectData;
+						break;
+					case "__debug_addr":
+						this.addr = sectData;
+						break;
+					case "__debug_info":
+						this.info = sectData;
+						break;
+					case "__debug_str":
+						this.strings = sectData;
+						break;
+					default:
+						break;
+					}
+				}
+			}
+		}
+
+	}
+
+	/*
+	 * https://www.ibm.com/docs/en/aix/7.2?topic=formats-xcoff-object-file-format
+	 */
+	private static final class XCOFF extends DwarfContainer {
+
+		private static final int FileHeaderSize = 24;
+
+		private static final int SectionHeaderSize = 72;
+
+		private static int getMagic(ByteBuffer buffer) {
+			int magic = 0;
+
+			magic |= (buffer.get(0) & 0xFF) << 8;
+			magic |= (buffer.get(1) & 0xFF);
+
+			return magic;
+		}
+
+		static boolean isXCOFF(FileChannel channel) throws IOException {
+			int magic = getMagic(channel.map(MapMode.READ_ONLY, 0, 2));
+
+			return magic == 0x01f7;
+		}
+
+		private static String toCString(byte[] data) {
+			StringBuilder buffer = new StringBuilder();
+
+			for (int index = 0; index < data.length; ++index) {
+				byte ch = data[index];
+
+				if (ch == 0) {
+					break;
+				}
+
+				buffer.append((char) (ch & 0xFF));
+			}
+
+			return buffer.toString();
+		}
+
+		XCOFF(FileChannel channel) throws IOException {
+			super();
+
+			// XCOFF is used only on AIX and z/OS which are both big-endian platforms.
+			ByteOrder order = ByteOrder.BIG_ENDIAN;
+			ByteBuffer buffer = channel.map(MapMode.READ_ONLY, 0, 20).order(order);
+
+			int nscns = buffer.getShort(2) & 0xFFFF;
+			int firstSectionOffset = FileHeaderSize + (buffer.getShort(16) & 0xFFFF);
+
+			ByteBuffer sectDescs = channel.map(MapMode.READ_ONLY, //
+					firstSectionOffset, nscns * (long) SectionHeaderSize).order(order);
+			byte[] nameBuffer = new byte[16];
+
+			for (int sectionNo = 0; sectionNo < nscns; ++sectionNo) {
+				int sectionOffset = sectionNo * SectionHeaderSize;
+
+				sectDescs.position(sectionOffset);
+				sectDescs.get(nameBuffer);
+
+				String sectionName = toCString(nameBuffer);
+				ByteBuffer sectData;
+
+				switch (sectionName) {
+				case ".debug": // stabs, not DWARF
+					long sectSize = sectDescs.getLong(sectionOffset + 24);
+					long sectOffset = sectDescs.getLong(sectionOffset + 32);
+
+					if (sectOffset == 0) {
+						continue;
+					}
+
+					System.out.format("@ 0x%012x len 0x%08x %s%n", sectOffset, sectSize, sectionName);
+
+					sectData = channel.map(MapMode.READ_ONLY, sectOffset, sectSize).order(order);
+					break;
+				default:
+					continue;
+				}
+
+				// TODO scan STABS format, translate to DWARF concepts
+			}
+		}
+
+	}
+
+	public static final int VERSION_MAXIMUM = 5;
+
+	public static final int VERSION_MINIMUM = 2;
+
+	static int checkUInt(long value) {
+		if (0 <= value && value <= Integer.MAX_VALUE) {
+			return (int) value;
+		}
+
+		throw new IllegalArgumentException("Not U4: " + value);
+	}
+
+	private final DataSource abbrevSection;
+
+	private final AddressTable addresses;
+
+	private final DataSource infoSection;
+
+	private final LongFunction<String> stringAccessor;
+
+	public DwarfScanner(String fileName) throws IOException {
+		super();
+
+		DwarfContainer dwarf;
+
+		try (FileChannel channel = FileChannel.open(Paths.get(fileName))) {
+			if (ELF.isELF(channel)) {
+				dwarf = new ELF(channel);
+			} else if (MachO.isMachO(channel)) {
+				dwarf = new MachO(channel);
+			} else if (XCOFF.isXCOFF(channel)) {
+				dwarf = new XCOFF(channel);
+			} else {
+				throw new IOException("Unrecognized file format");
+			}
+		}
+
+		Map<Long, String> stringCache = new HashMap<>();
+		DataSource stringData = new DataSource(dwarf.strings);
+		Function<Long, String> stringReader = offset -> stringData.position(offset.longValue()).getString();
+
+		this.abbrevSection = new DataSource(dwarf.abbrev);
+		this.addresses = new AddressTable(new DataSource(dwarf.addr));
+		this.infoSection = new DataSource(dwarf.info);
+		this.stringAccessor = offset -> stringCache.computeIfAbsent(Long.valueOf(offset), stringReader);
+	}
+
+	private void scanTags(DwarfRequestor requestor, DataSource data, LongFunction<Abbreviation> abbreviations) {
 		Stack<Abbreviation> tagStack = new Stack<>();
 
 		while (data.hasRemaining()) {
@@ -596,14 +1090,19 @@ public class DwarfScanner {
 				Abbreviation entry = abbreviations.apply(code);
 
 				if (entry != null) {
-					requestor.beginTag(entry.tag, tagOffset, entry.hasChildren);
-
-					entry.readAttributes(requestor, data);
-
-					if (entry.hasChildren) {
-						tagStack.push(entry);
+					if ((entry.tag == DwarfAttribute.DW_AT_addr_base) && tagStack.isEmpty()) {
+						// TODO remember offset
+						addresses.setAddressBase(0);
 					} else {
-						requestor.endTag(entry.tag, entry.hasChildren);
+						requestor.beginTag(entry.tag, tagOffset, entry.hasChildren);
+
+						entry.readAttributes(requestor, data, addresses);
+
+						if (entry.hasChildren) {
+							tagStack.push(entry);
+						} else {
+							requestor.endTag(entry.tag, entry.hasChildren);
+						}
 					}
 				}
 			} else {
@@ -622,57 +1121,6 @@ public class DwarfScanner {
 		}
 	}
 
-	private final DataSource abbrevSection;
-
-	private final DataSource infoSection;
-
-	private final LongFunction<String> stringAccessor;
-
-	public DwarfScanner(String fileName) throws IOException {
-		super();
-
-		ByteBuffer empty = ByteBuffer.allocate(0);
-		ByteBuffer abbrev = empty;
-		ByteBuffer info = empty;
-		ByteBuffer strings = empty;
-
-		try (FileChannel channel = FileChannel.open(Paths.get(fileName))) {
-			final Set<String> wantedSections = new HashSet<>();
-
-			wantedSections.add(".debug_abbrev");
-			wantedSections.add(".debug_info");
-			wantedSections.add(".debug_str");
-
-			Map<String, ByteBuffer> sectionMap = getSections(channel, wantedSections);
-
-			for (Map.Entry<String, ByteBuffer> entry : sectionMap.entrySet()) {
-				String name = entry.getKey();
-
-				switch (name) {
-				case ".debug_abbrev":
-					abbrev = entry.getValue();
-					break;
-				case ".debug_info":
-					info = entry.getValue();
-					break;
-				case ".debug_str":
-					strings = entry.getValue();
-					break;
-				default:
-					break;
-				}
-			}
-		}
-
-		Map<Long, String> stringCache = new HashMap<>();
-		DataSource stringData = new DataSource(strings);
-		Function<Long, String> stringReader = offset -> stringData.duplicate().position(offset.longValue()).getString();
-
-		this.abbrevSection = new DataSource(abbrev);
-		this.infoSection = new DataSource(info);
-		this.stringAccessor = offset -> stringCache.computeIfAbsent(Long.valueOf(offset), stringReader);
-	}
-
 	public void scanUnits(DwarfRequestor requestor) {
 		DataSource data = infoSection.duplicate();
 
@@ -681,7 +1129,7 @@ public class DwarfScanner {
 			long unitOffset = unit.position();
 			long unitLength = unit.getU4();
 			int offsetSize = 4;
-			long abbrevOffset = 0;
+			long abbrevOffset;
 
 			if (unitLength == 0 || unitLength == 0xFFFFFFFFL) {
 				unitLength = unit.getU8();
@@ -699,23 +1147,33 @@ public class DwarfScanner {
 				throw new IllegalArgumentException("version=" + version);
 			}
 
-			if (offsetSize == 8) {
-				abbrevOffset = unit.getU8();
+			int unitType;
+			int addressSize;
+
+			/*
+			 * in version 5
+			 * + the unitType field is added
+			 * + the addressSize and abbrevOffset fields are reversed
+			 */
+			if (version < 5) {
+				unitType = DwarfUnit.DW_UT_compile;
+				abbrevOffset = (offsetSize == 8) ? unit.getU8() : unit.getU4();
+				addressSize = unit.getU1();
 			} else {
-				abbrevOffset = unit.getU4();
+				unitType = unit.getU1();
+				addressSize = unit.getU1();
+				abbrevOffset = (offsetSize == 8) ? unit.getU8() : unit.getU4();
 			}
 
-			int addressSize = unit.getU1();
+			requestor.enterCompilationUnit(unitOffset, unitType);
 
-			requestor.enterCompilationUnit(unitOffset);
-
-			DataSource abbrevs = abbrevSection.duplicate().position(abbrevOffset);
+			DataSource abbrevs = abbrevSection.position(abbrevOffset);
 			LongFunction<Abbreviation> abbreviations = Abbreviation.readFrom(abbrevs);
 			DataSource source = new DataSource(unit, addressSize, offsetSize, stringAccessor);
 
 			scanTags(requestor, source, abbreviations);
 
-			requestor.exitCompilationUnit(unitOffset);
+			requestor.exitCompilationUnit(unitOffset, unitType);
 		}
 	}
 

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2017, 2018 IBM Corp. and others
+ * Copyright (c) 2017, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -23,7 +23,7 @@ package dwarf.tools;
 /**
  * Dwarf form codes.
  *
- * Source: http://www.dwarfstd.org/doc/DWARF4.pdf
+ * Source: http://www.dwarfstd.org/doc/DWARF5.pdf
  */
 public interface DwarfForm {
 
@@ -52,5 +52,25 @@ public interface DwarfForm {
 	int DW_FORM_exprloc = 0x18;
 	int DW_FORM_flag_present = 0x19;
 	int DW_FORM_ref_sig8 = 0x20;
+
+	// added in version 5
+	int DW_FORM_strx = 0x1a;
+	int DW_FORM_addrx = 0x1b;
+	int DW_FORM_ref_sup4 = 0x1c;
+	int DW_FORM_strp_sup = 0x1d;
+	int DW_FORM_data16 = 0x1e;
+	int DW_FORM_line_strp = 0x1f;
+	int DW_FORM_implicit_const = 0x21;
+	int DW_FORM_loclistx = 0x22;
+	int DW_FORM_rnglistx = 0x23;
+	int DW_FORM_ref_sup8 = 0x24;
+	int DW_FORM_strx1 = 0x25;
+	int DW_FORM_strx2 = 0x26;
+	int DW_FORM_strx3 = 0x27;
+	int DW_FORM_strx4 = 0x28;
+	int DW_FORM_addrx1 = 0x29;
+	int DW_FORM_addrx2 = 0x2a;
+	int DW_FORM_addrx3 = 0x2b;
+	int DW_FORM_addrx4 = 0x2c;
 
 }

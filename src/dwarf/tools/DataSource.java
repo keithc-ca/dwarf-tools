@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2017, 2018 IBM Corp. and others
+ * Copyright (c) 2017, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -23,13 +23,11 @@ package dwarf.tools;
 import java.io.ByteArrayOutputStream;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
 import java.util.Optional;
 import java.util.function.LongFunction;
 
 final class DataSource {
-
-	static final Charset UTF8 = Charset.forName("UTF-8");
 
 	private static long getU4(ByteBuffer data) {
 		return data.getInt() & ((1L << 32) - 1);
@@ -77,6 +75,10 @@ final class DataSource {
 		this(data.buffer, addressSize, offsetSize, stringLookup);
 	}
 
+	DataSource duplicate() {
+		return new DataSource(buffer.duplicate().order(buffer.order()), addressSize, offsetSize, stringLookup);
+	}
+
 	long getAddress() {
 		return getRef(addressSize);
 	}
@@ -103,10 +105,11 @@ final class DataSource {
 	long getSDATA() {
 		long result = 0;
 
-		for (int shift = 0;; shift += 7) {
+		for (int shift = 0;;) {
 			byte digit = buffer.get();
 
 			result |= ((long) (digit & 0x7F)) << shift;
+			shift += 7;
 
 			if (digit >= 0) {
 				if (shift < 64 && (digit & 0x40) != 0) {
@@ -131,7 +134,7 @@ final class DataSource {
 			content.write(ch);
 		}
 
-		return new String(content.toByteArray(), DataSource.UTF8);
+		return new String(content.toByteArray(), StandardCharsets.UTF_8);
 	}
 
 	int getU1() {
@@ -143,16 +146,17 @@ final class DataSource {
 	}
 
 	int getU3() {
-		int result = getU2();
+		int b0 = getU1();
+		int b1 = getU1() << 8;
+		int b2 = getU1();
 
 		if (buffer.order() == ByteOrder.LITTLE_ENDIAN) {
-			result += getU1() << 16;
+			b2 <<= 16;
 		} else {
-			result <<= 8;
-			result += getU1();
+			b0 <<= 16;
 		}
 
-		return result;
+		return b0 + b1 + b2;
 	}
 
 	long getU4() {
@@ -195,10 +199,6 @@ final class DataSource {
 		}
 
 		throw new IllegalArgumentException("position=" + offset);
-	}
-
-	DataSource duplicate() {
-		return new DataSource(buffer.duplicate().order(buffer.order()), addressSize, offsetSize, stringLookup);
 	}
 
 }

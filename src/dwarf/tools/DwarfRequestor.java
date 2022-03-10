@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2017, 2018 IBM Corp. and others
+ * Copyright (c) 2017, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -24,17 +24,19 @@ public interface DwarfRequestor {
 
 	/**
 	 * Enter a compilation unit.
-	 * 
+	 *
 	 * @param offset section offset of the compilation unit
+	 * @param type the type of compilation unit
 	 */
-	void enterCompilationUnit(long offset);
+	void enterCompilationUnit(long offset, int type);
 
 	/**
 	 * Exit the current compilation unit.
-	 * 
+	 *
 	 * @param offset section offset of the compilation unit
+	 * @param type the type of compilation unit
 	 */
-	void exitCompilationUnit(long offset);
+	void exitCompilationUnit(long offset, int type);
 
 	void beginTag(int tag, long offset, boolean hasChildren);
 
@@ -57,12 +59,12 @@ public interface DwarfRequestor {
 	DwarfRequestor NULL = new DwarfRequestor() {
 
 		@Override
-		public void enterCompilationUnit(long offset) {
+		public void enterCompilationUnit(long offset, int type) {
 			return;
 		}
 
 		@Override
-		public void exitCompilationUnit(long offset) {
+		public void exitCompilationUnit(long offset, int type) {
 			return;
 		}
 

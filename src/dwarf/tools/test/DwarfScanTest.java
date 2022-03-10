@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2017, 2018 IBM Corp. and others
+ * Copyright (c) 2017, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -94,12 +94,12 @@ public class DwarfScanTest {
 		}
 
 		@Override
-		public void enterCompilationUnit(long offset) {
+		public void enterCompilationUnit(long offset, int type) {
 			unitBeginCount += 1;
 		}
 
 		@Override
-		public void exitCompilationUnit(long offset) {
+		public void exitCompilationUnit(long offset, int type) {
 			unitEndCount += 1;
 		}
 
@@ -131,6 +131,7 @@ public class DwarfScanTest {
 				dumper.scanUnits(counter);
 			} catch (IOException e) {
 				e.printStackTrace();
+				continue;
 			}
 
 			long duration = System.nanoTime() - start;

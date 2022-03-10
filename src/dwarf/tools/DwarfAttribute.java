@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2017, 2018 IBM Corp. and others
+ * Copyright (c) 2017, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -23,7 +23,7 @@ package dwarf.tools;
 /**
  * Dwarf attribute values.
  *
- * Source: http://www.dwarfstd.org/doc/DWARF4.pdf
+ * Source: http://www.dwarfstd.org/doc/DWARF5.pdf
  */
 public interface DwarfAttribute {
 
@@ -119,6 +119,37 @@ public interface DwarfAttribute {
 	int DW_AT_const_expr = 0x6c;
 	int DW_AT_enum_class = 0x6d;
 	int DW_AT_linkage_name = 0x6e;
+
+	// added in version 5
+	int DW_AT_string_length_bit_size = 0x6f;
+	int DW_AT_string_length_byte_size = 0x70;
+	int DW_AT_rank = 0x71;
+	int DW_AT_str_offsets_base = 0x72;
+	int DW_AT_addr_base = 0x73;
+	int DW_AT_rnglists_base = 0x74;
+	int DW_AT_dwo_name = 0x76;
+	int DW_AT_reference = 0x77;
+	int DW_AT_rvalue_reference = 0x78;
+	int DW_AT_macros = 0x79;
+	int DW_AT_call_all_calls = 0x7a;
+	int DW_AT_call_all_source_calls = 0x7b;
+	int DW_AT_call_all_tail_calls = 0x7c;
+	int DW_AT_call_return_pc = 0x7d;
+	int DW_AT_call_value = 0x7e;
+	int DW_AT_call_origin = 0x7f;
+	int DW_AT_call_parameter = 0x80;
+	int DW_AT_call_pc = 0x81;
+	int DW_AT_call_tail_call = 0x82;
+	int DW_AT_call_target = 0x83;
+	int DW_AT_call_target_clobbered = 0x84;
+	int DW_AT_call_data_location = 0x85;
+	int DW_AT_call_data_value = 0x86;
+	int DW_AT_noreturn = 0x87;
+	int DW_AT_alignment = 0x88;
+	int DW_AT_export_symbols = 0x89;
+	int DW_AT_deleted = 0x8a;
+	int DW_AT_defaulted = 0x8b;
+	int DW_AT_loclists_base = 0x8c;
 
 	int DW_AT_lo_user = 0x2000;
 	int DW_AT_hi_user = 0x3fff;
