@@ -724,6 +724,16 @@ public class DwarfScanner {
 				e_shstrndx = buffer.getShort(0x3E);
 			}
 
+			if (e_shnum == 0) {
+				throw new IOException("No sections");
+			} else if (e_shnum < 3) {
+				throw new IOException("Too few sections");
+			}
+
+			if (e_shoff < (format32 ? 0x34 : 0x40)) {
+				throw new IOException("Bad section offset");
+			}
+
 			ByteBuffer sectDescs = channel.map(MapMode.READ_ONLY, e_shoff, e_shnum * (long) e_shentsize).order(order);
 			ByteBuffer sectNames;
 
