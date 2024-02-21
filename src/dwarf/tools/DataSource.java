@@ -25,9 +25,14 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
 import java.util.Optional;
-import java.util.function.LongFunction;
 
 final class DataSource {
+
+	static interface StringLookup {
+
+		String lookup(int form, long offset);
+
+	}
 
 	private static long getU4(ByteBuffer data) {
 		return data.getInt() & ((1L << 32) - 1);
@@ -57,13 +62,13 @@ final class DataSource {
 
 	private final int offsetSize;
 
-	private final LongFunction<String> stringLookup;
+	private final StringLookup stringLookup;
 
 	DataSource(ByteBuffer data) {
-		this(data, 0, 0, offset -> "");
+		this(data, 0, 0, (form, offset) -> "");
 	}
 
-	private DataSource(ByteBuffer data, int addressSize, int offsetSize, LongFunction<String> stringLookup) {
+	private DataSource(ByteBuffer data, int addressSize, int offsetSize, StringLookup stringLookup) {
 		super();
 		this.addressSize = addressSize;
 		this.buffer = data;
@@ -71,7 +76,7 @@ final class DataSource {
 		this.stringLookup = stringLookup;
 	}
 
-	DataSource(DataSource data, int addressSize, int offsetSize, LongFunction<String> stringLookup) {
+	DataSource(DataSource data, int addressSize, int offsetSize, StringLookup stringLookup) {
 		this(data.buffer, addressSize, offsetSize, stringLookup);
 	}
 
@@ -184,8 +189,8 @@ final class DataSource {
 		}
 	}
 
-	String lookupString(long offset) {
-		return Optional.ofNullable(stringLookup.apply(offset)).orElse("");
+	String lookupString(int form, long offset) {
+		return Optional.ofNullable(stringLookup.lookup(form, offset)).orElse("");
 	}
 
 	long position() {

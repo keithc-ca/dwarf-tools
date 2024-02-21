@@ -238,6 +238,8 @@ public class DwarfDumper {
 				return "sdata";
 			case DwarfForm.DW_FORM_strp:
 				return "strp";
+			case DwarfForm.DW_FORM_line_strp:
+				return "line_strp";
 			case DwarfForm.DW_FORM_udata:
 				return "udata";
 			case DwarfForm.DW_FORM_ref_addr:
@@ -260,6 +262,8 @@ public class DwarfDumper {
 				return "exprloc";
 			case DwarfForm.DW_FORM_flag_present:
 				return "flag_present";
+			case DwarfForm.DW_FORM_implicit_const:
+				return "implicit_const";
 			case DwarfForm.DW_FORM_ref_sig8:
 				return "ref_sig8";
 			default:

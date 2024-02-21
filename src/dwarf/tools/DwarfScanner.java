@@ -469,12 +469,13 @@ public class DwarfScanner {
 				case DwarfForm.DW_FORM_string:
 					string = data.getString();
 					break;
+				case DwarfForm.DW_FORM_line_strp:
 				case DwarfForm.DW_FORM_strp:
 					long position = data.position();
 					long offset = data.getOffset();
 
 					try {
-						string = data.lookupString(offset);
+						string = data.lookupString(form, offset);
 
 						// FIXME remove this
 						if (string.endsWith("checkcast.cpp")) {
@@ -546,6 +547,7 @@ public class DwarfScanner {
 			case DwarfForm.DW_FORM_indirect:
 				return new Indirect(attribute, form);
 
+			case DwarfForm.DW_FORM_line_strp:
 			case DwarfForm.DW_FORM_string:
 			case DwarfForm.DW_FORM_strp:
 				return new Str(attribute, form);
@@ -578,8 +580,6 @@ public class DwarfScanner {
 			case DwarfForm.DW_FORM_strp_sup:
 				return new Unknown(attribute, form); // TODO
 			case DwarfForm.DW_FORM_data16:
-				return new Unknown(attribute, form); // TODO
-			case DwarfForm.DW_FORM_line_strp:
 				return new Unknown(attribute, form); // TODO
 			case DwarfForm.DW_FORM_loclistx:
 				return new Unknown(attribute, form); // TODO
@@ -619,11 +619,12 @@ public class DwarfScanner {
 
 	}
 
-	private static abstract class DwarfContainer {
+	private abstract static class DwarfContainer {
 
 		ByteBuffer abbrev;
 		ByteBuffer addr;
 		ByteBuffer info;
+		ByteBuffer lineStrings;
 		ByteBuffer strings;
 
 		DwarfContainer() {
@@ -634,6 +635,7 @@ public class DwarfScanner {
 			this.abbrev = empty;
 			this.addr = empty;
 			this.info = empty;
+			this.lineStrings = empty;
 			this.strings = empty;
 		}
 
@@ -762,6 +764,7 @@ public class DwarfScanner {
 				case ".debug_abbrev":
 				case ".debug_addr":
 				case ".debug_info":
+				case ".debug_line_str":
 				case ".debug_str":
 					long sectOffset;
 					long sectSize;
@@ -789,6 +792,9 @@ public class DwarfScanner {
 					break;
 				case ".debug_info":
 					this.info = sectData;
+					break;
+				case ".debug_line_str":
+					this.lineStrings = sectData;
 					break;
 				case ".debug_str":
 					this.strings = sectData;
@@ -922,6 +928,7 @@ public class DwarfScanner {
 					case "__debug_abbrev":
 					case "__debug_addr":
 					case "__debug_info":
+					case "__debug_line_str":
 					case "__debug_str":
 						long sectOffset = cmdBuffer.getLong(sectionOffset + 48);
 						long sectSize = cmdBuffer.getLong(sectionOffset + 40);
@@ -943,6 +950,9 @@ public class DwarfScanner {
 						break;
 					case "__debug_info":
 						this.info = sectData;
+						break;
+					case "__debug_line_str":
+						this.lineStrings = sectData;
 						break;
 					case "__debug_str":
 						this.strings = sectData;
@@ -1054,13 +1064,21 @@ public class DwarfScanner {
 		throw new IllegalArgumentException("Not U4: " + value);
 	}
 
+	private static LongFunction<String> makeStringReader(ByteBuffer section) {
+		Map<Long, String> cache = new HashMap<>();
+		DataSource source = new DataSource(section);
+		Function<Long, String> reader = offset -> source.position(offset.longValue()).getString();
+
+		return offset -> cache.computeIfAbsent(Long.valueOf(offset), reader);
+	}
+
 	private final DataSource abbrevSection;
 
 	private final AddressTable addresses;
 
 	private final DataSource infoSection;
 
-	private final LongFunction<String> stringAccessor;
+	private final DataSource.StringLookup stringLookup;
 
 	public DwarfScanner(String fileName) throws IOException {
 		super();
@@ -1079,14 +1097,22 @@ public class DwarfScanner {
 			}
 		}
 
-		Map<Long, String> stringCache = new HashMap<>();
-		DataSource stringData = new DataSource(dwarf.strings);
-		Function<Long, String> stringReader = offset -> stringData.position(offset.longValue()).getString();
+		LongFunction<String> lineReader = makeStringReader(dwarf.lineStrings);
+		LongFunction<String> baseReader = makeStringReader(dwarf.strings);
 
 		this.abbrevSection = new DataSource(dwarf.abbrev);
 		this.addresses = new AddressTable(new DataSource(dwarf.addr));
 		this.infoSection = new DataSource(dwarf.info);
-		this.stringAccessor = offset -> stringCache.computeIfAbsent(Long.valueOf(offset), stringReader);
+		this.stringLookup = (form, offset) -> {
+			switch (form) {
+			case DwarfForm.DW_FORM_line_strp:
+				return lineReader.apply(offset);
+			case DwarfForm.DW_FORM_strp:
+				return baseReader.apply(offset);
+			default:
+				throw new IllegalStateException("form=" + form);
+			}
+		};
 	}
 
 	private void scanTags(DwarfRequestor requestor, DataSource data, LongFunction<Abbreviation> abbreviations) {
@@ -1179,7 +1205,7 @@ public class DwarfScanner {
 
 			DataSource abbrevs = abbrevSection.position(abbrevOffset);
 			LongFunction<Abbreviation> abbreviations = Abbreviation.readFrom(abbrevs);
-			DataSource source = new DataSource(unit, addressSize, offsetSize, stringAccessor);
+			DataSource source = new DataSource(unit, addressSize, offsetSize, stringLookup);
 
 			scanTags(requestor, source, abbreviations);
 
